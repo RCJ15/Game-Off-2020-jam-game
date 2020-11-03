@@ -9,12 +9,17 @@ public class PlayerController : MonoBehaviour
     private float startMoveSpeed;
     public float jumpHeight;
 
+    public bool facingRight;
+
     public float gravityScale;
 
+    //Crouching
     public bool isCrouching;
     public float crouchMoveSpeed;
     public float crouchMuscleForce;
+    public float crouchRestRotation;
 
+    //Muscles
     public float muscleForce;
     private float startMuscleForce;
     public _muscle headMuscle;
@@ -30,8 +35,13 @@ public class PlayerController : MonoBehaviour
     public float checkGroundOffsetY;
     public Vector2 checkGroundSize;
 
+    //Feet
     public bool leftFootOnGround;
     public bool rightFootOnGround;
+
+    public float feetCheckDist;
+    private float leftFootRot;
+    private float rightFootRot;
 
     public bool touchingGround;
 
@@ -53,6 +63,8 @@ public class PlayerController : MonoBehaviour
         //Set start variables
         startMuscleForce = muscleForce;
         startMoveSpeed = moveSpeed;
+
+        facingRight = true;
 
         //Set gravity
         rb.gravityScale = gravityScale;
@@ -99,6 +111,19 @@ public class PlayerController : MonoBehaviour
         {
             isCrouching = true;
             muscleForce = crouchMuscleForce;
+            moveSpeed = crouchMoveSpeed;
+
+            updateCrouch();
+        }
+
+        if (Input.GetKeyUp(KeyCode.S) && isCrouching)
+        {
+            isCrouching = false;
+            muscleForce = startMuscleForce;
+            moveSpeed = startMoveSpeed;
+
+            rightLeg.topLeg.restRotation = 0;
+            leftLeg.topLeg.restRotation = 0;
         }
 
         //Jump if on ground
@@ -117,6 +142,23 @@ public class PlayerController : MonoBehaviour
 
             StartCoroutine(Jump());
         }
+
+        //Update feet rotation
+        Transform leftFoot = leftLeg.foot.bone.transform;
+        Transform rightFoot = rightLeg.foot.bone.transform;
+
+        RaycastHit2D hit = Physics2D.Raycast(leftFoot.position, Vector2.down, feetCheckDist, groundLayer);
+        if (hit)
+        {
+            leftLeg.foot.restRotation = Quaternion.FromToRotation(Vector3.up, hit.normal).eulerAngles.z;
+        } else { leftLeg.foot.restRotation = 0; }
+
+        hit = Physics2D.Raycast(rightFoot.position, Vector2.down, feetCheckDist, groundLayer);
+        if (hit)
+        {
+            rightLeg.foot.restRotation = Quaternion.FromToRotation(Vector3.up, hit.normal).eulerAngles.z;
+        }
+        else { rightLeg.foot.restRotation = 0; }
     }
 
     private IEnumerator Jump()
@@ -142,7 +184,7 @@ public class PlayerController : MonoBehaviour
             }
         }
 
-        //Activate muslces to balance
+        //Activate muscles to balance
         headMuscle.ActivateMuscle(muscleForce);
         leftLeg.ActivateMuslces(muscleForce);
         rightLeg.ActivateMuslces(muscleForce);
@@ -183,6 +225,10 @@ public class PlayerController : MonoBehaviour
 
     private void TurnRight()
     {
+        facingRight = true;
+
+        updateCrouch();
+
         eyesAnim.SetTrigger("Right");
 
         leftFootPos.GetComponent<Animator>().SetTrigger("Right");
@@ -191,10 +237,20 @@ public class PlayerController : MonoBehaviour
 
     private void TurnLeft()
     {
+        facingRight = false;
+
+        updateCrouch();
+
         eyesAnim.SetTrigger("Left");
 
         leftFootPos.GetComponent<Animator>().SetTrigger("Left");
         rightFootPos.GetComponent<Animator>().SetTrigger("Left");
+    }
+
+    private void updateCrouch()
+    {
+        rightLeg.topLeg.restRotation = crouchRestRotation * (facingRight ? -1 : 1);
+        leftLeg.topLeg.restRotation = crouchRestRotation * (facingRight ? -1 : 1);
     }
 
     private void StartWalk()
@@ -208,8 +264,8 @@ public class PlayerController : MonoBehaviour
         {
             StopCoroutine(walkCoroutine);
         }
-        leftLeg.ResetLeg();
-        rightLeg.ResetLeg();
+        leftLeg.ResetLeg(isCrouching, crouchRestRotation, facingRight);
+        rightLeg.ResetLeg(isCrouching, crouchRestRotation, facingRight);
     }
 
     private IEnumerator walkCycle(bool startRight)
@@ -217,30 +273,30 @@ public class PlayerController : MonoBehaviour
         float distance = Vector2.Distance(new Vector2(0, Mathf.Abs(rb.velocity.x)), new Vector2(0, moveSpeed));
         if (startRight)
         {
-            rightLeg.MoveUp(walkingRight, distance, rightFootOnGround);
+            rightLeg.MoveUp(walkingRight, distance, rightFootOnGround, isCrouching);
         }
         else
         {
-            leftLeg.MoveUp(walkingRight, distance, leftFootOnGround);
+            leftLeg.MoveUp(walkingRight, distance, leftFootOnGround, isCrouching);
         }
 
         yield return new WaitForSeconds(0.5f);
-        leftLeg.ResetLeg();
-        rightLeg.ResetLeg();
+        leftLeg.ResetLeg(isCrouching, crouchRestRotation, facingRight);
+        rightLeg.ResetLeg(isCrouching, crouchRestRotation, facingRight);
 
         distance = Vector2.Distance(new Vector2(0, Mathf.Abs(rb.velocity.x)), new Vector2(0, moveSpeed));
         if (startRight)
         {
-            leftLeg.MoveUp(walkingRight, distance, leftFootOnGround);
+            leftLeg.MoveUp(walkingRight, distance, leftFootOnGround, isCrouching);
         }
         else
         {
-            rightLeg.MoveUp(walkingRight, distance, rightFootOnGround);
+            rightLeg.MoveUp(walkingRight, distance, rightFootOnGround, isCrouching);
         }
 
         yield return new WaitForSeconds(0.5f);
-        leftLeg.ResetLeg();
-        rightLeg.ResetLeg();
+        leftLeg.ResetLeg(isCrouching, crouchRestRotation, facingRight);
+        rightLeg.ResetLeg(isCrouching, crouchRestRotation, facingRight);
 
         walkCoroutine = StartCoroutine(walkCycle(walkingRight));
     }
@@ -300,24 +356,35 @@ public class PlayerLeg
         foot.ActivateMuscle(force);
     }
 
-    public void MoveUp(bool walkingRight, float value, bool legOnGround)
+    public void MoveUp(bool walkingRight, float value, bool legOnGround, bool isCrouching)
     {
         if (value < 4f)
         {
             topLeg.bone.AddForce(new Vector2(0, 20), ForceMode2D.Impulse);
         }
 
-        topLeg.restRotation = 60 * ((walkingRight) ? 1 : -1);
+        topLeg.restRotation = 60 * (walkingRight ? 1 : -1);
+        if (isCrouching)
+        {
+            topLeg.restRotation -= -35 * (walkingRight ? 1 : -1);
+        }
 
         if (legOnGround)
         {
-            topLeg.bone.AddTorque(10 * ((walkingRight) ? 1 : -1), ForceMode2D.Impulse);
+            topLeg.bone.AddTorque(10 * (walkingRight ? 1 : -1), ForceMode2D.Impulse);
         }
     }
 
-    public void ResetLeg()
+    public void ResetLeg(bool isCrouching, float crouchRotation, bool facingRight)
     {
-        topLeg.restRotation = 0;
+        if (isCrouching)
+        {
+            topLeg.restRotation = crouchRotation * (facingRight ? -1 : 1);
+        }
+        else
+        {
+            topLeg.restRotation = 0;
+        }
     }
 }
 
